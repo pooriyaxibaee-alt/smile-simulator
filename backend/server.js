@@ -1,45 +1,46 @@
 const express = require('express');
 const multer = require('multer');
-const { execFile } = require('child_process');
+const { exec } = require('child_process');
 const path = require('path');
-const cors = require('cors'); // 👈 اضافه کردن این خط
-
 const app = express();
-const PORT = 5001;
 
-// 👈 اضافه کردن این خط برای فعال کردن CORS
-app.use(cors());
-
-// ذخیره فایل‌ها در پوشه uploads
+// تنظیم Multer
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, 'uploads/'),
-  filename: (req, file, cb) => cb(null, file.originalname)
+  destination: './uploads/',
+  filename: (req, file, cb) => {
+    cb(null, `${Date.now()}-${file.originalname}`);
+  },
 });
 const upload = multer({ storage });
 
+// ایجاد فولدر uploads
+const fs = require('fs');
+if (!fs.existsSync('./uploads')) {
+  fs.mkdirSync('./uploads');
+}
+
+// Endpoint برای تست
 app.get('/', (req, res) => res.send('Hello World!'));
 
-app.post('/upload', upload.array('images', 5), (req, res) => {
-  if (!req.files || req.files.length === 0) {
-    return res.status(400).json({ error: 'No files uploaded.' });
+// Endpoint برای آپلود و پردازش
+app.post('/upload', upload.array('images', 2), (req, res) => {
+  if (!req.files || req.files.length !== 2) {
+    return res.status(400).send('Please upload exactly two images');
   }
 
-  const filePaths = req.files.map(file => path.join(__dirname, file.path));
+  const [referenceImage, patientImage] = req.files.map(file => file.path);
+  const pythonPath = '/Users/poriyazibaei/opt/anaconda3/envs/smileproject-env/bin/python'; // مسیر واقعی رو از which python بگیر
+  const scriptPath = path.join(__dirname, 'process_image.py');
 
-  execFile(
-    '/Users/poriyazibaei/opt/anaconda3/envs/smileproject-env/bin/python3',
-    [path.join(__dirname, 'process_image.py'), ...filePaths],
-    (error, stdout, stderr) => {
-      if (error) {
-        console.error('Error executing Python script:', error);
-        // 🔹 ارجاع پیام خطای پایتون به فرانت‌اند برای دیباگ بهتر
-        return res.status(500).json({ error: 'Error processing images', details: stderr || error.message });
-      }
-      if (stderr) console.error('Python stderr:', stderr);
+  console.log(`Running Python with paths: Ref=${referenceImage}, Patient=${patientImage}`); // لگاریگ برای عیب‌یابی
 
-      res.json({ result: stdout });
+  exec(`${pythonPath} ${scriptPath} "${referenceImage}" "${patientImage}"`, (err, stdout, stderr) => {
+    if (err) {
+      console.error(`Error: ${stderr}`);
+      return res.status(500).send(`Processing error: ${stderr}`);
     }
-  );
+    res.json({ result: stdout }); // ارسال کل stdout به frontend
+  });
 });
 
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(5001, () => console.log('Server running on port 5001'));
